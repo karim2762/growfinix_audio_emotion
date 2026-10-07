@@ -1,7 +1,3 @@
-"""Streamlit demo: upload or record speech -> waveform, spectrogram, predicted emotion.
-
-Run:  streamlit run app.py
-"""
 import io
 import json
 
@@ -19,7 +15,7 @@ st.title("🎙️ Speech Emotion Classifier")
 st.caption("A CNN looks at a log-Mel spectrogram (an 'image of sound') and guesses the emotion.")
 
 
-@st.cache_resource  # load the model once, not on every click
+@st.cache_resource
 def load_model():
     import keras
     model_path, labels_path = C.MODELS_DIR / "best_model.keras", C.MODELS_DIR / "labels.json"
@@ -45,7 +41,7 @@ if audio_file is None:
     st.stop()
 
 st.audio(audio_file)
-y = preprocess_waveform(load_audio(io.BytesIO(audio_file.getvalue())))  # same preprocessing as training
+y = preprocess_waveform(load_audio(io.BytesIO(audio_file.getvalue())))
 spec_db = log_mel(y)
 
 col1, col2 = st.columns(2)
@@ -63,7 +59,7 @@ with col2:
     fig.colorbar(img, ax=ax, format="%+0.0f dB")
     st.pyplot(fig)
 
-x = normalize(spec_db)[None, ..., None]  # (1, 128, 130, 1): batch of one "image"
+x = normalize(spec_db)[None, ..., None]
 probs = model.predict(x, verbose=0)[0]
 best = int(probs.argmax())
 st.subheader(f"Prediction: **{labels[best].upper()}** ({probs[best]:.0%} confidence)")

@@ -1,14 +1,9 @@
-"""Train the CNN, then save curves / confusion matrix / report to assets/.
-
-Run:  python train.py            (speaker-independent split, ~5-10 min on a laptop CPU)
-      python train.py --random-split   (stratified random split; optimistic, see README)
-"""
 import argparse
 import json
 import math
 
 import matplotlib
-matplotlib.use("Agg")  # draw to files, no display needed
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 from sklearn.metrics import ConfusionMatrixDisplay, classification_report, confusion_matrix
@@ -23,15 +18,8 @@ from src.model import build_model
 
 
 def speaker_independent_split(actors: np.ndarray, rng: np.random.Generator):
-    """Split by ACTOR so no voice appears in more than one set.
-
-    WHY: if the same actor is in train and test, the model can cheat by
-    recognising the voice instead of the emotion -> inflated accuracy.
-    RAVDESS actors each record the same number of clips per emotion, so any
-    actor split is automatically class-balanced (i.e. stratified).
-    """
     ids = rng.permutation(np.unique(actors))
-    n_hold = max(1, round(len(ids) * 0.17))  # 24 actors -> 4 val, 4 test, 16 train
+    n_hold = max(1, round(len(ids) * 0.17))
     val_a, test_a, train_a = ids[:n_hold], ids[n_hold:2 * n_hold], ids[2 * n_hold:]
     pick = lambda group: np.where(np.isin(actors, group))[0]
     print(f"Actors  train={sorted(train_a.tolist())}  val={sorted(val_a.tolist())}  test={sorted(test_a.tolist())}")
@@ -39,7 +27,6 @@ def speaker_independent_split(actors: np.ndarray, rng: np.random.Generator):
 
 
 def stratified_random_split(y: np.ndarray):
-    """Plain stratified 70/15/15 split (same speaker may appear in several sets)."""
     idx = np.arange(len(y))
     train, rest = train_test_split(idx, test_size=0.30, stratify=y, random_state=C.SEED)
     val, test = train_test_split(rest, test_size=0.5, stratify=y[rest], random_state=C.SEED)
@@ -47,12 +34,6 @@ def stratified_random_split(y: np.ndarray):
 
 
 class SpecAugSequence(keras.utils.PyDataset):
-    """Feeds batches to Keras and applies fresh SpecAugment masks every epoch.
-
-    Also returns a per-sample weight (= its class weight), which is how we apply
-    class weights with a custom data source.
-    """
-
     def __init__(self, X, y, sample_weight, batch_size, seed):
         super().__init__()
         self.X, self.y, self.w, self.bs = X, y, sample_weight, batch_size
@@ -65,7 +46,7 @@ class SpecAugSequence(keras.utils.PyDataset):
 
     def __getitem__(self, i):
         idx = self.order[i * self.bs:(i + 1) * self.bs]
-        xb = np.stack([spec_augment(self.X[j], self.rng) for j in idx])[..., None]  # add channel axis
+        xb = np.stack([spec_augment(self.X[j], self.rng) for j in idx])[..., None]
         return xb, self.y[idx], self.w[idx]
 
     def on_epoch_end(self):
@@ -97,7 +78,7 @@ def main():
     C.MODELS_DIR.mkdir(exist_ok=True)
 
     if not (C.PROCESSED_DIR / "X.npy").exists():
-        build_dataset()  # first run: compute spectrograms
+        build_dataset()
     P = C.PROCESSED_DIR
     X, X_aug, y, actors = (np.load(P / f) for f in ["X.npy", "X_aug.npy", "y.npy", "actors.npy"])
     classes = json.loads((P / "labels.json").read_text())
@@ -106,14 +87,12 @@ def main():
     rng = np.random.default_rng(C.SEED)
     tr, va, te = stratified_random_split(y) if args.random_split else speaker_independent_split(actors, rng)
 
-    # Training set = clean clips + their augmented twins. Val/test stay clean & untouched.
     X_train = np.concatenate([X[tr], X_aug[tr]])
     y_train = np.concatenate([y[tr], y[tr]])
     X_val, y_val = X[va][..., None], y[va]
     X_test, y_test = X[te][..., None], y[te]
     print(f"train={len(X_train)} (incl. augmented)  val={len(X_val)}  test={len(X_test)}")
 
-    # Class weights: rare classes count more in the loss (matters if you add 'neutral', which has half the clips).
     cw = compute_class_weight("balanced", classes=np.arange(len(classes)), y=y_train)
     print("Class weights:", dict(zip(classes, cw.round(2))))
     train_seq = SpecAugSequence(X_train, y_train, cw[y_train].astype("float32"), args.batch_size, C.SEED)
@@ -121,17 +100,13 @@ def main():
     model = build_model(len(classes))
     ckpt = C.MODELS_DIR / "best_model.keras"
     callbacks = [
-        # Stop when val loss stops improving; WHY: more epochs past that point = memorising.
         keras.callbacks.EarlyStopping(monitor="val_loss", patience=8, restore_best_weights=True),
-        # Always keep the best model on disk, even if training later gets worse.
         keras.callbacks.ModelCheckpoint(ckpt, monitor="val_loss", save_best_only=True),
-        # Lower the learning rate when stuck: smaller steps help fine-tune.
         keras.callbacks.ReduceLROnPlateau(monitor="val_loss", factor=0.5, patience=3, min_lr=1e-5),
     ]
     history = model.fit(train_seq, validation_data=(X_val, y_val), epochs=args.epochs,
                         callbacks=callbacks, verbose=2)
 
-    # ---- Evaluate the best checkpoint on the untouched test set ----
     best = keras.models.load_model(ckpt)
     y_pred = best.predict(X_test, verbose=0).argmax(axis=1)
     report = classification_report(y_test, y_pred, target_names=classes, digits=3)

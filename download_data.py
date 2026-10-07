@@ -1,22 +1,3 @@
-"""Download RAVDESS (speech) from Zenodo and keep only angry / happy / sad.
-
-Usage:
-    python download_data.py                    # angry, happy, sad
-    python download_data.py --include-neutral  # + neutral
-
-Result: data/raw/<emotion>/<original-filename>.wav
-
-RAVDESS filename = 7 numbers separated by '-':
-    modality-vocalChannel-EMOTION-intensity-statement-repetition-ACTOR
-    e.g. 03-01-05-01-02-01-12.wav  -> emotion 05 (angry), actor 12
-The actor id matters: we use it later for a speaker-independent split.
-
-Alternative dataset: TESS (Toronto Emotional Speech Set: 2 actresses, ~2800 clips,
-7 emotions). It needs a Kaggle/Dataverse login, so it is not auto-downloaded here.
-To use it, copy the angry/happy/sad clips into data/raw/<emotion>/ and rename each
-file to end in a speaker number, e.g. "OAF_back_angry.wav" -> "OAF_back-1.wav"
-(OAF=1, YAF=2). Heads-up: with only 2 speakers a speaker-independent split is weak.
-"""
 import argparse
 import zipfile
 from pathlib import Path
@@ -31,12 +12,11 @@ ZIP_PATH = C.DATA_DIR / "Audio_Speech_Actors_01-24.zip"
 
 
 def download(url: str, dest: Path) -> None:
-    """Stream the file to disk (so we never hold ~215 MB in RAM) with a progress bar."""
     if dest.exists():
         print(f"Already downloaded: {dest}")
         return
     dest.parent.mkdir(parents=True, exist_ok=True)
-    tmp = dest.with_suffix(".part")  # write to .part so a crash can't leave a corrupt .zip
+    tmp = dest.with_suffix(".part")
     with requests.get(url, stream=True, timeout=60) as r:
         r.raise_for_status()
         total = int(r.headers.get("content-length", 0))
@@ -48,7 +28,6 @@ def download(url: str, dest: Path) -> None:
 
 
 def extract_filtered(zip_path: Path, keep: set) -> dict:
-    """Copy only the wanted emotions straight out of the zip (no need to unzip everything)."""
     counts = {e: 0 for e in keep}
     with zipfile.ZipFile(zip_path) as zf:
         for name in zf.namelist():
